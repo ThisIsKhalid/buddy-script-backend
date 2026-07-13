@@ -1,20 +1,8 @@
-import prisma from "../lib/prisma";
-import logger from "../utils/logger/logger";
+import prisma from "../../lib/prisma";
+import logger from "../logger/logger";
 
-// ---------------------------------------------------------------------------
-// Cleanup intervals (ms)
 // ---------------------------------------------------------------------------
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000; // every hour
-
-// ---------------------------------------------------------------------------
-// Prune expired OTP tokens
-// ---------------------------------------------------------------------------
-const pruneExpiredOtpTokens = async (): Promise<number> => {
-  const { count } = await prisma.otpToken.deleteMany({
-    where: { expiresAt: { lt: new Date() } },
-  });
-  return count;
-};
 
 // ---------------------------------------------------------------------------
 // Prune expired & revoked refresh tokens (older than 7 days)
@@ -32,22 +20,6 @@ const pruneStaleRefreshTokens = async (): Promise<number> => {
 };
 
 // ---------------------------------------------------------------------------
-// Prune old completed / failed email jobs (older than 7 days)
-// ---------------------------------------------------------------------------
-const pruneOldEmailJobs = async (): Promise<number> => {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - 7);
-
-  const { count } = await prisma.emailJob.deleteMany({
-    where: {
-      status: { in: ["SENT", "FAILED"] },
-      createdAt: { lt: cutoff },
-    },
-  });
-  return count;
-};
-
-// ---------------------------------------------------------------------------
 // Worker loop
 // ---------------------------------------------------------------------------
 let running = false;
@@ -56,18 +28,13 @@ let timer: ReturnType<typeof setTimeout> | null = null;
 const tick = async (): Promise<void> => {
   if (!running) return;
   try {
-    const [otpCount, rtCount, ejCount] = await Promise.all([
-      pruneExpiredOtpTokens(),
-      pruneStaleRefreshTokens(),
-      pruneOldEmailJobs(),
-    ]);
+    const [rtCount] = await Promise.all([pruneStaleRefreshTokens()]);
 
-    if (otpCount + rtCount + ejCount > 0) {
+    if (rtCount > 0) {
       logger.info({
         message: "Cleanup: pruned stale records",
-        otpTokens: otpCount,
+
         refreshTokens: rtCount,
-        emailJobs: ejCount,
       });
     }
   } catch (err) {

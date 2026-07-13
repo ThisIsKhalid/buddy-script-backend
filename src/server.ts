@@ -4,7 +4,6 @@ import config from "./config";
 import prisma from "./lib/prisma";
 import redis from "./lib/redisConnection";
 import logger from "./utils/logger/logger";
-import { startEmailWorker, stopEmailWorker } from "./utils/workers/emailWorker";
 import { startCleanupWorker, stopCleanupWorker } from "./utils/workers/cleanupWorker";
 
 let server: Server;
@@ -19,7 +18,6 @@ async function main() {
     await redis.connect();
 
     // 3. Start background workers
-    startEmailWorker();
     startCleanupWorker();
 
     // 4. Start HTTP server
@@ -54,9 +52,6 @@ const gracefulShutdown = async (signal: string) => {
   if (server) {
     server.close(async () => {
       logger.info("HTTP server closed.");
-
-      stopEmailWorker();
-      logger.info("Email worker stopped.");
 
       stopCleanupWorker();
       logger.info("Cleanup worker stopped.");
