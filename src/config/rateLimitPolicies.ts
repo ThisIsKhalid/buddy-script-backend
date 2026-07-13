@@ -107,3 +107,67 @@ export const anonymousPolicy: RateLimitPolicy = {
   keyGenerator: ipKey,
   message: "Too many requests. Please try again later.",
 };
+
+// ---------------------------------------------------------------------------
+// Posts policies
+// ---------------------------------------------------------------------------
+
+/**
+ * Post feed — 100 per 15 min per IP.
+ * Read-heavy, public listing endpoint.
+ */
+export const postFeedPolicy: RateLimitPolicy = {
+  windowMs: WINDOW_MS,
+  max: 100,
+  keyPrefix: "post:feed",
+  keyGenerator: ipKey,
+  message: "Too many feed requests. Please try again later.",
+};
+
+/**
+ * Post create — 20 per 15 min per IP.
+ * Write operation; limits spam and mass-posting.
+ */
+export const postCreatePolicy: RateLimitPolicy = {
+  windowMs: WINDOW_MS,
+  max: 20,
+  keyPrefix: "post:create",
+  keyGenerator: ipKey,
+  message: "Too many posts created. Please try again later.",
+};
+
+/**
+ * Post delete — 10 per 15 min per IP.
+ * Destructive operation; kept restrictive.
+ */
+export const postDeletePolicy: RateLimitPolicy = {
+  windowMs: WINDOW_MS,
+  max: 10,
+  keyPrefix: "post:delete",
+  keyGenerator: ipKey,
+  message: "Too many delete requests. Please try again later.",
+};
+
+/**
+ * Post save/unsave — 30 per 15 min per IP.
+ * Toggle action; moderate limit.
+ */
+export const postSavePolicy: RateLimitPolicy = {
+  windowMs: WINDOW_MS,
+  max: 30,
+  keyPrefix: "post:save",
+  keyGenerator: ipKey,
+  message: "Too many save requests. Please try again later.",
+};
+
+/**
+ * Single post fetch — 100 per 15 min per IP.
+ * Read operation; generous limit.
+ */
+export const postGetPolicy: RateLimitPolicy = {
+  windowMs: WINDOW_MS,
+  max: 100,
+  keyPrefix: "post:get",
+  keyGenerator: ipKey,
+  message: "Too many requests. Please try again later.",
+};
