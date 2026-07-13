@@ -18,7 +18,11 @@ const app: Application = express();
 // Security Middlewares
 // ---------------------------------------------------------------------------
 
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
 
 // Trust proxy (needed when behind nginx/load balancer)
 app.set("trust proxy", 1);
