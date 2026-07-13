@@ -98,16 +98,16 @@ const login = async (loginData: ILoginInput, meta: RefreshTokenMeta = {}) => {
 
   const { accessToken, refreshToken } = jwtHelpers.generateAuthTokens(payload);
 
-  await saveRefreshToken(user.id, refreshToken, {
-    userAgent: meta.userAgent,
-    ip: meta.ip,
-  });
-
-  // Update last login
-  await prisma.user.update({
-    where: { id: user.id },
-    data: { lastLogin: new Date() },
-  });
+  await Promise.all([
+    saveRefreshToken(user.id, refreshToken, {
+      userAgent: meta.userAgent,
+      ip: meta.ip,
+    }),
+    prisma.user.update({
+      where: { id: user.id },
+      data: { lastLogin: new Date() },
+    }),
+  ]);
 
   return {
     accessToken,

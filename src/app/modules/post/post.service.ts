@@ -1,9 +1,49 @@
+import { TargetType } from "@prisma/client";
 import httpStatus from "http-status";
 import ApiError from "../../../errors/apiError";
 import prisma from "../../../lib/prisma";
 import { ICreatePostInput, ICursorPaginationQuery } from "./post.interface";
 
 const toClientVisibility = (visibility: string) => visibility.toLowerCase();
+
+const getLikeStats = async (
+  targetType: TargetType,
+  targetIds: string[],
+  currentUserId?: string
+) => {
+  if (targetIds.length === 0) {
+    return {
+      likeCountByTargetId: new Map<string, number>(),
+      likedTargetIds: new Set<string>(),
+    };
+  }
+
+  const [counts, myLikes] = await Promise.all([
+    prisma.like.groupBy({
+      by: ["targetId"],
+      where: {
+        targetType,
+        targetId: { in: targetIds },
+      },
+      _count: { _all: true },
+    }),
+    currentUserId
+      ? prisma.like.findMany({
+          where: {
+            targetType,
+            targetId: { in: targetIds },
+            userId: currentUserId,
+          },
+          select: { targetId: true },
+        })
+      : Promise.resolve([]),
+  ]);
+
+  return {
+    likeCountByTargetId: new Map(counts.map((count) => [count.targetId, count._count._all])),
+    likedTargetIds: new Set(myLikes.map((like) => like.targetId)),
+  };
+};
 
 const createPost = async (userId: string, data: ICreatePostInput) => {
   const visibility = (data.visibility ?? "PUBLIC").toUpperCase() as "PUBLIC" | "PRIVATE";
@@ -72,16 +112,13 @@ const getFeed = async (query: ICursorPaginationQuery, currentUserId?: string) =>
   const items = hasNextPage ? posts.slice(0, limit) : posts;
 
   const postIds = items.map((p) => p.id);
-  const likes = await prisma.like.findMany({
-    where: {
-      targetType: "POST",
-      targetId: { in: postIds },
-    },
-    select: { targetId: true, userId: true },
-  });
+  const { likeCountByTargetId, likedTargetIds } = await getLikeStats(
+    TargetType.POST,
+    postIds,
+    currentUserId
+  );
 
   const mappedItems = items.map((post) => {
-    const postLikes = likes.filter((l) => l.targetId === post.id);
     return {
       id: post.id,
       authorId: post.authorId,
@@ -95,9 +132,9 @@ const getFeed = async (query: ICursorPaginationQuery, currentUserId?: string) =>
       text: post.text,
       imageUrl: post.imageUrl,
       visibility: toClientVisibility(post.visibility),
-      likeCount: postLikes.length,
+      likeCount: likeCountByTargetId.get(post.id) ?? 0,
       commentCount: post._count.comments,
-      isLikedByMe: currentUserId ? postLikes.some((l) => l.userId === currentUserId) : false,
+      isLikedByMe: likedTargetIds.has(post.id),
       createdAt: post.createdAt.toISOString(),
     };
   });
@@ -128,10 +165,23 @@ const getPostById = async (postId: string, currentUserId?: string) => {
     throw new ApiError(httpStatus.FORBIDDEN, "You do not have access to this post.");
   }
 
-  const postLikes = await prisma.like.findMany({
-    where: { targetType: "POST", targetId: post.id },
-    select: { userId: true },
-  });
+  const [likeCount, myLike] = await Promise.all([
+    prisma.like.count({
+      where: { targetType: TargetType.POST, targetId: post.id },
+    }),
+    currentUserId
+      ? prisma.like.findUnique({
+          where: {
+            userId_targetType_targetId: {
+              userId: currentUserId,
+              targetType: TargetType.POST,
+              targetId: post.id,
+            },
+          },
+          select: { id: true },
+        })
+      : Promise.resolve(null),
+  ]);
 
   return {
     id: post.id,
@@ -146,9 +196,9 @@ const getPostById = async (postId: string, currentUserId?: string) => {
     text: post.text,
     imageUrl: post.imageUrl,
     visibility: toClientVisibility(post.visibility),
-    likeCount: postLikes.length,
+    likeCount,
     commentCount: post._count.comments,
-    isLikedByMe: currentUserId ? postLikes.some((l) => l.userId === currentUserId) : false,
+    isLikedByMe: !!myLike,
     createdAt: post.createdAt.toISOString(),
   };
 };
@@ -199,16 +249,13 @@ const getMyPosts = async (userId: string, query: ICursorPaginationQuery) => {
   const items = hasNextPage ? posts.slice(0, limit) : posts;
 
   const postIds = items.map((p) => p.id);
-  const likes = await prisma.like.findMany({
-    where: {
-      targetType: "POST",
-      targetId: { in: postIds },
-    },
-    select: { targetId: true, userId: true },
-  });
+  const { likeCountByTargetId, likedTargetIds } = await getLikeStats(
+    TargetType.POST,
+    postIds,
+    userId
+  );
 
   const mappedItems = items.map((post) => {
-    const postLikes = likes.filter((l) => l.targetId === post.id);
     return {
       id: post.id,
       authorId: post.authorId,
@@ -222,9 +269,9 @@ const getMyPosts = async (userId: string, query: ICursorPaginationQuery) => {
       text: post.text,
       imageUrl: post.imageUrl,
       visibility: toClientVisibility(post.visibility),
-      likeCount: postLikes.length,
+      likeCount: likeCountByTargetId.get(post.id) ?? 0,
       commentCount: post._count.comments,
-      isLikedByMe: postLikes.some((l) => l.userId === userId),
+      isLikedByMe: likedTargetIds.has(post.id),
       createdAt: post.createdAt.toISOString(),
     };
   });
@@ -266,23 +313,29 @@ const toggleLikePost = async (postId: string, userId: string) => {
     throw new ApiError(httpStatus.NOT_FOUND, "Post not found.");
   }
 
-  const existingLike = await prisma.like.findFirst({
-    where: { targetType: "POST", targetId: postId, userId },
+  const existingLike = await prisma.like.findUnique({
+    where: {
+      userId_targetType_targetId: {
+        userId,
+        targetType: TargetType.POST,
+        targetId: postId,
+      },
+    },
   });
 
   if (existingLike) {
     await prisma.like.delete({ where: { id: existingLike.id } });
     const count = await prisma.like.count({
-      where: { targetType: "POST", targetId: postId },
+      where: { targetType: TargetType.POST, targetId: postId },
     });
     return { isLiked: false, likeCount: count };
   }
 
   await prisma.like.create({
-    data: { targetType: "POST", targetId: postId, userId },
+    data: { targetType: TargetType.POST, targetId: postId, userId },
   });
   const count = await prisma.like.count({
-    where: { targetType: "POST", targetId: postId },
+    where: { targetType: TargetType.POST, targetId: postId },
   });
   return { isLiked: true, likeCount: count };
 };
@@ -290,7 +343,7 @@ const toggleLikePost = async (postId: string, userId: string) => {
 
 const getPostLikes = async (postId: string, query: ICursorPaginationQuery) => {
   const limit = query.limit ?? 10;
-  const where: Record<string, any> = { targetType: "POST", targetId: postId };
+  const where: Record<string, any> = { targetType: TargetType.POST, targetId: postId };
 
   if (query.cursor) {
     const cursorLike = await prisma.like.findUnique({
@@ -395,16 +448,13 @@ const getComments = async (postId: string, query: ICursorPaginationQuery, curren
   const items = hasNextPage ? comments.slice(0, limit) : comments;
 
   const commentIds = items.map((c) => c.id);
-  const likes = await prisma.like.findMany({
-    where: {
-      targetType: "COMMENT",
-      targetId: { in: commentIds },
-    },
-    select: { targetId: true, userId: true },
-  });
+  const { likeCountByTargetId, likedTargetIds } = await getLikeStats(
+    TargetType.COMMENT,
+    commentIds,
+    currentUserId
+  );
 
   const mappedComments = items.map((c) => {
-    const commentLikes = likes.filter((l) => l.targetId === c.id);
     return {
       id: c.id,
       postId: c.postId,
@@ -417,9 +467,9 @@ const getComments = async (postId: string, query: ICursorPaginationQuery, curren
         avatarUrl: c.author.avatarUrl,
       },
       text: c.text,
-      likeCount: commentLikes.length,
+      likeCount: likeCountByTargetId.get(c.id) ?? 0,
       replyCount: c._count.replyComments,
-      isLikedByMe: currentUserId ? commentLikes.some((l) => l.userId === currentUserId) : false,
+      isLikedByMe: likedTargetIds.has(c.id),
       createdAt: c.createdAt.toISOString(),
     };
   });
@@ -435,23 +485,29 @@ const toggleLikeComment = async (commentId: string, userId: string) => {
     throw new ApiError(httpStatus.NOT_FOUND, "Comment not found.");
   }
 
-  const existingLike = await prisma.like.findFirst({
-    where: { targetType: "COMMENT", targetId: commentId, userId },
+  const existingLike = await prisma.like.findUnique({
+    where: {
+      userId_targetType_targetId: {
+        userId,
+        targetType: TargetType.COMMENT,
+        targetId: commentId,
+      },
+    },
   });
 
   if (existingLike) {
     await prisma.like.delete({ where: { id: existingLike.id } });
     const count = await prisma.like.count({
-      where: { targetType: "COMMENT", targetId: commentId },
+      where: { targetType: TargetType.COMMENT, targetId: commentId },
     });
     return { isLiked: false, likeCount: count };
   }
 
   await prisma.like.create({
-    data: { targetType: "COMMENT", targetId: commentId, userId },
+    data: { targetType: TargetType.COMMENT, targetId: commentId, userId },
   });
   const count = await prisma.like.count({
-    where: { targetType: "COMMENT", targetId: commentId },
+    where: { targetType: TargetType.COMMENT, targetId: commentId },
   });
   return { isLiked: true, likeCount: count };
 };
@@ -459,7 +515,7 @@ const toggleLikeComment = async (commentId: string, userId: string) => {
 
 const getCommentLikes = async (commentId: string, query: ICursorPaginationQuery) => {
   const limit = query.limit ?? 10;
-  const where: Record<string, any> = { targetType: "COMMENT", targetId: commentId };
+  const where: Record<string, any> = { targetType: TargetType.COMMENT, targetId: commentId };
 
   if (query.cursor) {
     const cursorLike = await prisma.like.findUnique({
@@ -562,16 +618,13 @@ const getReplies = async (commentId: string, query: ICursorPaginationQuery, curr
   const items = hasNextPage ? replies.slice(0, limit) : replies;
 
   const replyIds = items.map((r) => r.id);
-  const likes = await prisma.like.findMany({
-    where: {
-      targetType: "REPLY_COMMENT",
-      targetId: { in: replyIds },
-    },
-    select: { targetId: true, userId: true },
-  });
+  const { likeCountByTargetId, likedTargetIds } = await getLikeStats(
+    TargetType.REPLY_COMMENT,
+    replyIds,
+    currentUserId
+  );
 
   const mappedReplies = items.map((r) => {
-    const replyLikes = likes.filter((l) => l.targetId === r.id);
     return {
       id: r.id,
       commentId: r.commentId,
@@ -584,8 +637,8 @@ const getReplies = async (commentId: string, query: ICursorPaginationQuery, curr
         avatarUrl: r.author.avatarUrl,
       },
       text: r.text,
-      likeCount: replyLikes.length,
-      isLikedByMe: currentUserId ? replyLikes.some((l) => l.userId === currentUserId) : false,
+      likeCount: likeCountByTargetId.get(r.id) ?? 0,
+      isLikedByMe: likedTargetIds.has(r.id),
       createdAt: r.createdAt.toISOString(),
     };
   });
@@ -601,23 +654,29 @@ const toggleLikeReply = async (replyId: string, userId: string) => {
     throw new ApiError(httpStatus.NOT_FOUND, "Reply not found.");
   }
 
-  const existingLike = await prisma.like.findFirst({
-    where: { targetType: "REPLY_COMMENT", targetId: replyId, userId },
+  const existingLike = await prisma.like.findUnique({
+    where: {
+      userId_targetType_targetId: {
+        userId,
+        targetType: TargetType.REPLY_COMMENT,
+        targetId: replyId,
+      },
+    },
   });
 
   if (existingLike) {
     await prisma.like.delete({ where: { id: existingLike.id } });
     const count = await prisma.like.count({
-      where: { targetType: "REPLY_COMMENT", targetId: replyId },
+      where: { targetType: TargetType.REPLY_COMMENT, targetId: replyId },
     });
     return { isLiked: false, likeCount: count };
   }
 
   await prisma.like.create({
-    data: { targetType: "REPLY_COMMENT", targetId: replyId, userId },
+    data: { targetType: TargetType.REPLY_COMMENT, targetId: replyId, userId },
   });
   const count = await prisma.like.count({
-    where: { targetType: "REPLY_COMMENT", targetId: replyId },
+    where: { targetType: TargetType.REPLY_COMMENT, targetId: replyId },
   });
   return { isLiked: true, likeCount: count };
 };
@@ -625,7 +684,7 @@ const toggleLikeReply = async (replyId: string, userId: string) => {
 
 const getReplyLikes = async (replyId: string, query: ICursorPaginationQuery) => {
   const limit = query.limit ?? 10;
-  const where: Record<string, any> = { targetType: "REPLY_COMMENT", targetId: replyId };
+  const where: Record<string, any> = { targetType: TargetType.REPLY_COMMENT, targetId: replyId };
 
   if (query.cursor) {
     const cursorLike = await prisma.like.findUnique({

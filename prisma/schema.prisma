@@ -71,6 +71,9 @@ model Post {
 
   savedPosts SavedPost[]
   comments   Comment[]
+
+  @@index([visibility, createdAt])
+  @@index([authorId, createdAt])
 }
 
 model SavedPost {
@@ -98,7 +101,7 @@ model Comment {
 
   replyComments ReplyComment[]
 
-  @@index([postId])
+  @@index([postId, createdAt])
   @@index([authorId])
 }
 
@@ -113,7 +116,7 @@ model ReplyComment {
   comment Comment @relation(fields: [commentId], references: [id], onDelete: Cascade)
   author  User    @relation(fields: [authorId], references: [id], onDelete: Cascade)
 
-  @@index([commentId])
+  @@index([commentId, createdAt])
   @@index([authorId])
 }
 
@@ -133,4 +136,5 @@ model Like {
   createdAt DateTime @default(now())
 
   @@unique([userId, targetType, targetId])
+  @@index([targetType, targetId, createdAt])
 }

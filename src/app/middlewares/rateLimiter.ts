@@ -60,16 +60,14 @@ export const rateLimiter = (policy: RateLimitPolicy) => {
     const windowSeconds = Math.ceil(windowMs / 1000);
 
     try {
-      // INCR is atomic — safe under concurrent requests.
-      const count = await redis.incr(key);
+      const result = await redis.multi().incr(key).ttl(key).exec();
+      const count = Number(result?.[0]?.[1] ?? 0);
+      let ttl = Number(result?.[1]?.[1] ?? -1);
 
-      // Set TTL only on the first request in the window (avoids resetting).
-      if (count === 1) {
+      if (count === 1 || ttl < 0) {
         await redis.expire(key, windowSeconds);
+        ttl = windowSeconds;
       }
-
-      // Fetch remaining TTL for the Reset header.
-      const ttl = await redis.ttl(key);
       const reset = Math.floor(Date.now() / 1000) + (ttl > 0 ? ttl : windowSeconds);
 
       // Set standard rate-limit headers (RFC 6585 / draft-ietf-httpapi-ratelimit-headers).
