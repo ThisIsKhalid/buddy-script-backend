@@ -84,7 +84,14 @@ const createPost = async (userId: string, data: ICreatePostInput) => {
 const getFeed = async (query: ICursorPaginationQuery, currentUserId?: string) => {
   const limit = query.limit ?? 10;
 
-  const where: Record<string, unknown> = { visibility: "PUBLIC" };
+  const where: Record<string, unknown> = currentUserId
+    ? {
+        OR: [
+          { visibility: "PUBLIC" },
+          { visibility: "PRIVATE", authorId: currentUserId },
+        ],
+      }
+    : { visibility: "PUBLIC" };
 
   if (query.cursor) {
     const cursorPost = await prisma.post.findUnique({
