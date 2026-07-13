@@ -25,19 +25,27 @@ const validateRequest =
     // Assign the parsed (and sanitised) data back to the request.
     // Unknown fields have been stripped by the schema.
     const data = result.data as Record<string, unknown>;
-    req.body = data.body ?? {};
-    Object.defineProperty(req, "query", {
-      value: data.query ?? {},
-      writable: true,
-      configurable: true,
-      enumerable: true,
-    });
-    Object.defineProperty(req, "params", {
-      value: data.params ?? {},
-      writable: true,
-      configurable: true,
-      enumerable: true,
-    });
+    const hasParsedKey = (key: string) => Object.prototype.hasOwnProperty.call(data, key);
+
+    if (hasParsedKey("body")) {
+      req.body = data.body ?? {};
+    }
+    if (hasParsedKey("query")) {
+      Object.defineProperty(req, "query", {
+        value: data.query ?? {},
+        writable: true,
+        configurable: true,
+        enumerable: true,
+      });
+    }
+    if (hasParsedKey("params")) {
+      Object.defineProperty(req, "params", {
+        value: data.params ?? {},
+        writable: true,
+        configurable: true,
+        enumerable: true,
+      });
+    }
 
     next();
   };

@@ -66,7 +66,7 @@ const register = async (userData: IUser) => {
       lastName: userData.lastName,
       passwordHash: hashedPassword,
     },
-    select: { id: true, firstName: true, lastName: true, email: true },
+    select: { id: true, firstName: true, lastName: true, email: true, avatarUrl: true, createdAt: true },
   });
 
   return user;
@@ -117,6 +117,8 @@ const login = async (loginData: ILoginInput, meta: RefreshTokenMeta = {}) => {
       firstName: user.firstName,
       lastName: user.lastName,
       email: user.email,
+      avatarUrl: user.avatarUrl,
+      createdAt: user.createdAt.toISOString(),
     },
   };
 };
@@ -258,6 +260,7 @@ const getMe = async (id: string) => {
       firstName: true,
       lastName: true,
       email: true,
+      avatarUrl: true,
       isActive: true,
       lastLogin: true,
       createdAt: true,
@@ -267,7 +270,11 @@ const getMe = async (id: string) => {
   if (!user) {
     throw new ApiError(httpStatus.NOT_FOUND, "User not found.");
   }
-  return user;
+  return {
+    ...user,
+    createdAt: user.createdAt.toISOString(),
+    lastLogin: user.lastLogin?.toISOString() ?? null,
+  };
 };
 
 export const AuthService = {

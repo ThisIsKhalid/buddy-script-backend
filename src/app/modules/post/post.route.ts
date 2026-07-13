@@ -1,13 +1,5 @@
 import express from "express";
-import {
-  postCreatePolicy,
-  postDeletePolicy,
-  postFeedPolicy,
-  postGetPolicy,
-  postSavePolicy,
-} from "../../../config/rateLimitPolicies";
 import auth from "../../middlewares/auth";
-import { rateLimiter } from "../../middlewares/rateLimiter";
 import { RequestValidation } from "../../middlewares/validateRequest";
 import { PostController } from "./post.controller";
 import { PostValidation } from "./post.validation";
@@ -18,7 +10,6 @@ const router = express.Router();
 router.get(
   "/",
   auth(),
-  rateLimiter(postFeedPolicy),
   RequestValidation.validateRequest(PostValidation.cursorPaginationZodSchema),
   PostController.getFeed
 );
@@ -26,7 +17,6 @@ router.get(
 router.get(
   "/my-posts",
   auth(),
-  rateLimiter(postFeedPolicy),
   RequestValidation.validateRequest(PostValidation.cursorPaginationZodSchema),
   PostController.getMyPosts
 );
@@ -34,7 +24,6 @@ router.get(
 router.post(
   "/",
   auth(),
-  rateLimiter(postCreatePolicy),
   RequestValidation.validateRequest(PostValidation.createPostZodSchema),
   PostController.createPost
 );
@@ -45,7 +34,7 @@ router.post(
 router.post(
   "/:postId/save",
   auth(),
-  rateLimiter(postSavePolicy),
+
   RequestValidation.validateRequest(PostValidation.postIdParamZodSchema),
   PostController.toggleSavePost
 );
@@ -53,8 +42,7 @@ router.post(
 
 router.get(
   "/:postId",
-  auth(),
-  rateLimiter(postGetPolicy),
+
   RequestValidation.validateRequest(PostValidation.postIdParamZodSchema),
   PostController.getPostById
 );
@@ -62,9 +50,45 @@ router.get(
 router.delete(
   "/:postId",
   auth(),
-  rateLimiter(postDeletePolicy),
+
   RequestValidation.validateRequest(PostValidation.postIdParamZodSchema),
   PostController.deletePost
+);
+
+// Likes
+router.post("/:postId/like", auth(), PostController.toggleLikePost);
+router.get(
+  "/:postId/likes",
+  RequestValidation.validateRequest(PostValidation.cursorPaginationZodSchema),
+  PostController.getPostLikes
+);
+
+// Comments
+router.get(
+  "/:postId/comments",
+  RequestValidation.validateRequest(PostValidation.cursorPaginationZodSchema),
+  PostController.getComments
+);
+router.post("/:postId/comments", auth(), PostController.createComment);
+router.post("/:postId/comments/:commentId/like", auth(), PostController.toggleLikeComment);
+router.get(
+  "/:postId/comments/:commentId/likes",
+  RequestValidation.validateRequest(PostValidation.cursorPaginationZodSchema),
+  PostController.getCommentLikes
+);
+
+// Replies
+router.get(
+  "/:postId/comments/:commentId/replies",
+  RequestValidation.validateRequest(PostValidation.cursorPaginationZodSchema),
+  PostController.getReplies
+);
+router.post("/:postId/comments/:commentId/replies", auth(), PostController.createReply);
+router.post("/:postId/comments/:commentId/replies/:replyId/like", auth(), PostController.toggleLikeReply);
+router.get(
+  "/:postId/comments/:commentId/replies/:replyId/likes",
+  RequestValidation.validateRequest(PostValidation.cursorPaginationZodSchema),
+  PostController.getReplyLikes
 );
 
 export const PostRoutes = router;

@@ -1,7 +1,7 @@
 export interface ICreatePostInput {
-  text: string;
-  imageUrl?: string;
-  visibility?: "PUBLIC" | "PRIVATE";
+  text?: string;
+  imageUrl?: string | null;
+  visibility?: "PUBLIC" | "PRIVATE" | "public" | "private";
 }
 
 export interface ICursorPaginationQuery {

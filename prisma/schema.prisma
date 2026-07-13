@@ -18,6 +18,7 @@ model User {
   lastName     String
   email        String @unique
   passwordHash String
+  avatarUrl    String?
   role         Role     @default(USER)
 
   isActive  Boolean   @default(true)
@@ -130,4 +131,6 @@ model Like {
   targetId   String     @db.ObjectId
 
   createdAt DateTime @default(now())
+
+  @@unique([userId, targetType, targetId])
 }
