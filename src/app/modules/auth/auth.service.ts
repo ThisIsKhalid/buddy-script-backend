@@ -1,49 +1,17 @@
-import { OtpPurpose } from "@prisma/client";
 import crypto from "crypto";
 import httpStatus from "http-status";
 import config from "../../../config";
 import ApiError from "../../../errors/apiError";
-import emailSender from "../../../helpers/email_sender/emailSender";
 import prisma from "../../../lib/prisma";
 import {
   acquireLock,
   blacklistToken,
-  consumeResetToken,
-  incrementOtpAttempts,
-  incrementOtpIpAttempts,
-  isOtpOnCooldown,
   isTokenBlacklisted,
-  OTP_IP_MAX,
-  OTP_MAX_ATTEMPTS,
   releaseLock,
-  resetOtpAttempts,
-  setOtpCooldown,
-  storeResetToken,
 } from "../../../lib/redisConnection";
-import { otpEmail } from "../../../shared/emails/otpEmail";
-import { passwordResetEmail } from "../../../shared/emails/passwordResetEmail";
-import { generateOTP } from "../../../utils/generateOtp";
-import {
-  compareItem,
-  compareOtp,
-  hashItem,
-  hashOtp,
-  hashToken,
-} from "../../../utils/hashAndCompareItem";
+import { compareItem, hashItem, hashToken } from "../../../utils/hashAndCompareItem";
 import { ITokenPayload, jwtHelpers } from "../../../utils/jwtHelpers";
-import {
-  IChangePasswordInput,
-  IForgotPasswordInput,
-  ILoginInput,
-  IRefreshTokenInput,
-  IResendOtpInput,
-  IResetPasswordInput,
-  IUser,
-  IVerifyEmailInput,
-  IVerifyOtpInput,
-} from "./auth.interface";
-
-const OTP_EXPIRY_MINUTES = 10;
+import { ILoginInput, IRefreshTokenInput, IUser } from "./auth.interface";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -76,28 +44,6 @@ const saveRefreshToken = async (userId: string, token: string, meta: RefreshToke
   });
 };
 
-const createAndSendOtp = async (email: string, purpose: OtpPurpose, userId: string) => {
-  // Invalidate previous unused OTPs for this purpose
-  await prisma.otpToken.updateMany({
-    where: { userId, purpose, used: false },
-    data: { used: true },
-  });
-
-  const otp = generateOTP();
-  const otpHash = hashOtp(otp);
-  const expiresAt = new Date(Date.now() + OTP_EXPIRY_MINUTES * 60 * 1000);
-
-  await prisma.otpToken.create({
-    data: { userId, otpHash, purpose, expiresAt },
-  });
-
-  if (purpose === OtpPurpose.EMAIL_VERIFICATION) {
-    await emailSender("Email Verification OTP", email, otpEmail(otp));
-  } else {
-    await emailSender("Password Reset OTP", email, passwordResetEmail(otp));
-  }
-};
-
 // ---------------------------------------------------------------------------
 // Service methods
 // ---------------------------------------------------------------------------
@@ -116,14 +62,12 @@ const register = async (userData: IUser) => {
   const user = await prisma.user.create({
     data: {
       email,
-      name: userData.name,
-      password: hashedPassword,
+      firstName: userData.firstName,
+      lastName: userData.lastName,
+      passwordHash: hashedPassword,
     },
-    select: { id: true, name: true, email: true, role: true, isEmailVerified: true },
+    select: { id: true, firstName: true, lastName: true, email: true },
   });
-
-  // Send verification OTP
-  await createAndSendOtp(user.email, OtpPurpose.EMAIL_VERIFICATION, user.id);
 
   return user;
 };
@@ -142,15 +86,14 @@ const login = async (loginData: ILoginInput, meta: RefreshTokenMeta = {}) => {
     throw new ApiError(httpStatus.FORBIDDEN, "Your account has been deactivated.");
   }
 
-  const isPasswordValid = await compareItem(loginData.password, user.password);
+  const isPasswordValid = await compareItem(loginData.password, user.passwordHash);
   if (!isPasswordValid) {
     throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid email or password.");
   }
 
   const payload: ITokenPayload = {
-    id: user.id,
+    userId: user.id,
     email: user.email,
-    role: user.role,
   };
 
   const { accessToken, refreshToken } = jwtHelpers.generateAuthTokens(payload);
@@ -171,10 +114,9 @@ const login = async (loginData: ILoginInput, meta: RefreshTokenMeta = {}) => {
     refreshToken,
     user: {
       id: user.id,
-      name: user.name,
+      firstName: user.firstName,
+      lastName: user.lastName,
       email: user.email,
-      role: user.role,
-      isEmailVerified: user.isEmailVerified,
     },
   };
 };
@@ -265,7 +207,7 @@ const refreshAccessToken = async ({ refreshToken, userAgent, ip }: IRefreshToken
     // 8. Issue new token pair (same family)
     // ----------------------------------------------------------------
     const user = await prisma.user.findUnique({
-      where: { id: decoded.id },
+      where: { id: decoded.userId },
       select: { id: true, email: true, role: true, isActive: true },
     });
 
@@ -273,7 +215,7 @@ const refreshAccessToken = async ({ refreshToken, userAgent, ip }: IRefreshToken
       throw new ApiError(httpStatus.UNAUTHORIZED, "User not found or account deactivated.");
     }
 
-    const payload: ITokenPayload = { id: user.id, email: user.email, role: user.role };
+    const payload: ITokenPayload = { userId: user.id, email: user.email };
     const { accessToken, refreshToken: newRefreshToken } = jwtHelpers.generateAuthTokens(payload);
 
     await saveRefreshToken(user.id, newRefreshToken, {
@@ -308,248 +250,14 @@ const logout = async (accessToken: string, refreshToken?: string) => {
   }
 };
 
-const verifyEmail = async ({ email: rawEmail, otp, ip }: IVerifyEmailInput & { ip?: string }) => {
-  const email = rawEmail.toLowerCase();
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    throw new ApiError(httpStatus.NOT_FOUND, "User not found.");
-  }
-  if (user.isEmailVerified) {
-    throw new ApiError(httpStatus.BAD_REQUEST, "Email is already verified.");
-  }
-
-  // --- Rate-limit checks ---
-  if (await isOtpOnCooldown(user.id, OtpPurpose.EMAIL_VERIFICATION)) {
-    throw new ApiError(
-      httpStatus.TOO_MANY_REQUESTS,
-      "Too many failed attempts. Please wait 15 minutes or request a new OTP."
-    );
-  }
-  if (ip && (await incrementOtpIpAttempts(ip)) > OTP_IP_MAX) {
-    throw new ApiError(
-      httpStatus.TOO_MANY_REQUESTS,
-      "Too many OTP attempts from this IP. Please try again later."
-    );
-  }
-
-  const otpRecords = await prisma.otpToken.findMany({
-    where: {
-      userId: user.id,
-      purpose: OtpPurpose.EMAIL_VERIFICATION,
-      used: false,
-      expiresAt: { gt: new Date() },
-    },
-  });
-
-  // Compare OTP against stored hashes
-  let otpRecord: (typeof otpRecords)[number] | null = null;
-  for (const record of otpRecords) {
-    if (compareOtp(otp, record.otpHash)) {
-      otpRecord = record;
-      break;
-    }
-  }
-
-  if (!otpRecord) {
-    const attempts = await incrementOtpAttempts(user.id, OtpPurpose.EMAIL_VERIFICATION);
-    if (attempts >= OTP_MAX_ATTEMPTS) {
-      await setOtpCooldown(user.id, OtpPurpose.EMAIL_VERIFICATION);
-      throw new ApiError(
-        httpStatus.TOO_MANY_REQUESTS,
-        "Too many failed attempts. Please wait 15 minutes or request a new OTP."
-      );
-    }
-    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid or expired OTP.");
-  }
-
-  // Success — reset counters
-  await resetOtpAttempts(user.id, OtpPurpose.EMAIL_VERIFICATION);
-
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: user.id },
-      data: { isEmailVerified: true },
-    }),
-    prisma.otpToken.update({
-      where: { id: otpRecord.id },
-      data: { used: true },
-    }),
-  ]);
-};
-
-const resendOtp = async ({ email: rawEmail, purpose }: IResendOtpInput) => {
-  const email = rawEmail.toLowerCase();
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    throw new ApiError(httpStatus.NOT_FOUND, "User not found.");
-  }
-
-  if (purpose === "EMAIL_VERIFICATION" && user.isEmailVerified) {
-    throw new ApiError(httpStatus.BAD_REQUEST, "Email is already verified.");
-  }
-
-  await createAndSendOtp(email, purpose as OtpPurpose, user.id);
-};
-
-const forgotPassword = async ({ email: rawEmail }: IForgotPasswordInput) => {
-  const email = rawEmail.toLowerCase();
-  const user = await prisma.user.findUnique({ where: { email } });
-  // Return success even if user not found (security: don't confirm email existence)
-  if (!user) return;
-
-  await createAndSendOtp(email, OtpPurpose.PASSWORD_RESET, user.id);
-};
-
-const verifyOtp = async ({ email: rawEmail, otp, ip }: IVerifyOtpInput & { ip?: string }) => {
-  const email = rawEmail.toLowerCase();
-  const user = await prisma.user.findUnique({ where: { email } });
-  if (!user) {
-    throw new ApiError(httpStatus.NOT_FOUND, "User not found.");
-  }
-
-  // --- Rate-limit checks ---
-  if (await isOtpOnCooldown(user.id, OtpPurpose.PASSWORD_RESET)) {
-    throw new ApiError(
-      httpStatus.TOO_MANY_REQUESTS,
-      "Too many failed attempts. Please wait 15 minutes or request a new OTP."
-    );
-  }
-  if (ip && (await incrementOtpIpAttempts(ip)) > OTP_IP_MAX) {
-    throw new ApiError(
-      httpStatus.TOO_MANY_REQUESTS,
-      "Too many OTP attempts from this IP. Please try again later."
-    );
-  }
-
-  const otpRecords = await prisma.otpToken.findMany({
-    where: {
-      userId: user.id,
-      purpose: OtpPurpose.PASSWORD_RESET,
-      used: false,
-      expiresAt: { gt: new Date() },
-    },
-  });
-
-  // Compare OTP against stored hashes
-  let otpRecord: (typeof otpRecords)[number] | null = null;
-  for (const record of otpRecords) {
-    if (compareOtp(otp, record.otpHash)) {
-      otpRecord = record;
-      break;
-    }
-  }
-
-  if (!otpRecord) {
-    const attempts = await incrementOtpAttempts(user.id, OtpPurpose.PASSWORD_RESET);
-    if (attempts >= OTP_MAX_ATTEMPTS) {
-      await setOtpCooldown(user.id, OtpPurpose.PASSWORD_RESET);
-      throw new ApiError(
-        httpStatus.TOO_MANY_REQUESTS,
-        "Too many failed attempts. Please wait 15 minutes or request a new OTP."
-      );
-    }
-    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid or expired OTP.");
-  }
-
-  // Success — reset counters
-  await resetOtpAttempts(user.id, OtpPurpose.PASSWORD_RESET);
-
-  await prisma.otpToken.update({
-    where: { id: otpRecord.id },
-    data: { used: true },
-  });
-
-  // --- Issue a single-use, purpose-scoped reset token ---
-  const jti = crypto.randomUUID();
-  const resetToken = jwtHelpers.generateToken(
-    {
-      sub: user.id,
-      email: user.email,
-      purpose: "PASSWORD_RESET",
-      jti,
-    },
-    config.jwt.resetSecret,
-    config.jwt.resetExpiresIn
-  );
-
-  // Store token hash server-side so it can only be consumed once
-  await storeResetToken(hashToken(resetToken), user.id);
-
-  return { resetToken };
-};
-
-const resetPassword = async ({ resetToken, newPassword }: IResetPasswordInput) => {
-  // 1. Verify JWT signature + claims
-  let decoded: { sub: string; email: string; purpose: string; jti: string };
-  try {
-    decoded = jwtHelpers.verifyToken(resetToken, config.jwt.resetSecret) as {
-      sub: string;
-      email: string;
-      purpose: string;
-      jti: string;
-    };
-  } catch {
-    throw new ApiError(httpStatus.UNAUTHORIZED, "Invalid or expired reset token.");
-  }
-
-  if (decoded.purpose !== "PASSWORD_RESET") {
-    throw new ApiError(httpStatus.BAD_REQUEST, "Invalid token purpose.");
-  }
-
-  // 2. Consume token atomically — fails if already used or expired
-  const tokenUserId = await consumeResetToken(hashToken(resetToken));
-  if (!tokenUserId || tokenUserId !== decoded.sub) {
-    throw new ApiError(httpStatus.UNAUTHORIZED, "Reset token has already been used or is invalid.");
-  }
-
-  // 3. Apply the password change
-  const user = await prisma.user.findUnique({ where: { id: decoded.sub } });
-  if (!user) {
-    throw new ApiError(httpStatus.NOT_FOUND, "User not found.");
-  }
-
-  const hashedPassword = await hashItem(newPassword);
-
-  await prisma.$transaction([
-    prisma.user.update({
-      where: { id: user.id },
-      data: { password: hashedPassword },
-    }),
-    // Revoke all refresh tokens on password reset
-    prisma.refreshToken.deleteMany({ where: { userId: user.id } }),
-  ]);
-};
-
-const changePassword = async (userId: string, data: IChangePasswordInput) => {
-  const user = await prisma.user.findUnique({ where: { id: userId } });
-  if (!user) {
-    throw new ApiError(httpStatus.NOT_FOUND, "User not found.");
-  }
-
-  const isOldPasswordValid = await compareItem(data.oldPassword, user.password);
-  if (!isOldPasswordValid) {
-    throw new ApiError(httpStatus.BAD_REQUEST, "Old password is incorrect.");
-  }
-
-  const hashedPassword = await hashItem(data.newPassword);
-  await prisma.user.update({
-    where: { id: userId },
-    data: { password: hashedPassword },
-  });
-
-  // Revoke all refresh tokens
-  await prisma.refreshToken.deleteMany({ where: { userId } });
-};
-
 const getMe = async (id: string) => {
   const user = await prisma.user.findUnique({
     where: { id },
     select: {
       id: true,
-      name: true,
+      firstName: true,
+      lastName: true,
       email: true,
-      role: true,
-      isEmailVerified: true,
       isActive: true,
       lastLogin: true,
       createdAt: true,
@@ -567,11 +275,5 @@ export const AuthService = {
   login,
   refreshAccessToken,
   logout,
-  verifyEmail,
-  resendOtp,
-  forgotPassword,
-  verifyOtp,
-  resetPassword,
-  changePassword,
   getMe,
 };

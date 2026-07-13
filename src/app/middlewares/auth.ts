@@ -49,7 +49,7 @@ const auth = (...roles: string[]) => {
 
       // Verify user still exists and is active
       const user = await prisma.user.findUnique({
-        where: { id: decoded.id },
+        where: { id: decoded.userId as string },
         select: { id: true, email: true, role: true, isActive: true },
       });
 
@@ -72,7 +72,11 @@ const auth = (...roles: string[]) => {
         );
       }
 
-      req.user = decoded as typeof req.user;
+      req.user = {
+        id: decoded.userId as string,
+        email: decoded.email as string,
+        role: user.role,
+      };
       next();
     } catch (error) {
       next(error);

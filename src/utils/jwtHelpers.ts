@@ -1,4 +1,4 @@
-import { Role } from "@prisma/client";
+
 import jwt, { JwtPayload, Secret, SignOptions } from "jsonwebtoken";
 import config from "../config";
 
@@ -22,9 +22,8 @@ const verifyToken = (token: string, secret: Secret) => {
 };
 
 export interface ITokenPayload {
-  id: string;
+  userId: string;
   email: string;
-  role: Role;
 }
 
 const generateAuthTokens = (payload: ITokenPayload) => {

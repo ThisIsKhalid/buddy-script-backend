@@ -1,7 +1,8 @@
 export interface IUser {
   email: string;
   password: string;
-  name: string;
+  firstName: string;
+  lastName: string;
 }
 
 export interface ILoginInput {
@@ -13,33 +14,4 @@ export interface IRefreshTokenInput {
   refreshToken: string;
   userAgent?: string;
   ip?: string;
-}
-
-export interface IForgotPasswordInput {
-  email: string;
-}
-
-export interface IVerifyOtpInput {
-  email: string;
-  otp: string;
-}
-
-export interface IResetPasswordInput {
-  resetToken: string;
-  newPassword: string;
-}
-
-export interface IVerifyEmailInput {
-  email: string;
-  otp: string;
-}
-
-export interface IResendOtpInput {
-  email: string;
-  purpose: "EMAIL_VERIFICATION" | "PASSWORD_RESET";
-}
-
-export interface IChangePasswordInput {
-  oldPassword: string;
-  newPassword: string;
 }

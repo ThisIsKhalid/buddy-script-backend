@@ -19,7 +19,8 @@ const normalisedEmail = z
 const createUserZodSchema = z.object({
   body: z
     .object({
-      name: z.string().min(1, "Name is required"),
+      firstName: z.string().min(1, "First name is required"),
+      lastName: z.string().min(1, "Last name is required"),
       email: normalisedEmail,
       password: z.string().min(6, "Password must be at least 6 characters long"),
     })
@@ -43,67 +44,9 @@ const refreshTokenZodSchema = z.object({
     .strict(),
 });
 
-const forgotPasswordZodSchema = z.object({
-  body: z
-    .object({
-      email: normalisedEmail,
-    })
-    .strict(),
-});
-
-const verifyOtpZodSchema = z.object({
-  body: z
-    .object({
-      email: normalisedEmail,
-      otp: z.string().length(6, "OTP must be exactly 6 digits"),
-    })
-    .strict(),
-});
-
-const resetPasswordZodSchema = z.object({
-  body: z
-    .object({
-      resetToken: z.string().min(1, "Reset token is required"),
-      newPassword: z.string().min(6, "Password must be at least 6 characters long"),
-    })
-    .strict(),
-});
-
-const verifyEmailZodSchema = z.object({
-  body: z
-    .object({
-      email: normalisedEmail,
-      otp: z.string().length(6, "OTP must be exactly 6 digits"),
-    })
-    .strict(),
-});
-
-const resendOtpZodSchema = z.object({
-  body: z
-    .object({
-      email: normalisedEmail,
-      purpose: z.enum(["EMAIL_VERIFICATION", "PASSWORD_RESET"]),
-    })
-    .strict(),
-});
-
-const changePasswordZodSchema = z.object({
-  body: z
-    .object({
-      oldPassword: z.string().min(1, "Old password is required"),
-      newPassword: z.string().min(6, "New password must be at least 6 characters long"),
-    })
-    .strict(),
-});
-
 export const AuthValidation = {
   createUserZodSchema,
   loginZodSchema,
   refreshTokenZodSchema,
-  forgotPasswordZodSchema,
-  verifyOtpZodSchema,
-  resetPasswordZodSchema,
-  verifyEmailZodSchema,
-  resendOtpZodSchema,
-  changePasswordZodSchema,
+ 
 };

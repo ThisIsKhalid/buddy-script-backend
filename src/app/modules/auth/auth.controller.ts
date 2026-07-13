@@ -53,66 +53,6 @@ const logout = catchAsync(async (req: Request, res: Response) => {
   });
 });
 
-const verifyEmail = catchAsync(async (req: Request, res: Response) => {
-  await AuthService.verifyEmail({ ...req.body, ip: req.ip });
-  sendResponse(res, {
-    success: true,
-    statusCode: httpStatus.OK,
-    message: "Email verified successfully.",
-    data: null,
-  });
-});
-
-const resendOtp = catchAsync(async (req: Request, res: Response) => {
-  await AuthService.resendOtp(req.body);
-  sendResponse(res, {
-    success: true,
-    statusCode: httpStatus.OK,
-    message: "OTP sent successfully. Please check your email.",
-    data: null,
-  });
-});
-
-const forgotPassword = catchAsync(async (req: Request, res: Response) => {
-  await AuthService.forgotPassword(req.body);
-  sendResponse(res, {
-    success: true,
-    statusCode: httpStatus.OK,
-    // Deliberately vague to prevent user enumeration
-    message: "If that email exists, a password reset OTP has been sent.",
-    data: null,
-  });
-});
-
-const verifyOtp = catchAsync(async (req: Request, res: Response) => {
-  const result = await AuthService.verifyOtp({ ...req.body, ip: req.ip });
-  sendResponse(res, {
-    success: true,
-    statusCode: httpStatus.OK,
-    message: "OTP verified successfully. You can now reset your password.",
-    data: result,
-  });
-});
-
-const resetPassword = catchAsync(async (req: Request, res: Response) => {
-  await AuthService.resetPassword(req.body);
-  sendResponse(res, {
-    success: true,
-    statusCode: httpStatus.OK,
-    message: "Password reset successfully. Please log in with your new password.",
-    data: null,
-  });
-});
-
-const changePassword = catchAsync(async (req: Request, res: Response) => {
-  await AuthService.changePassword(req.user.id as string, req.body);
-  sendResponse(res, {
-    success: true,
-    statusCode: httpStatus.OK,
-    message: "Password changed successfully. Please log in again.",
-    data: null,
-  });
-});
 
 const getMe = catchAsync(async (req: Request, res: Response) => {
   const result = await AuthService.getMe(req.user.id as string);
@@ -129,11 +69,5 @@ export const AuthController = {
   login,
   refreshToken,
   logout,
-  verifyEmail,
-  resendOtp,
-  forgotPassword,
-  verifyOtp,
-  resetPassword,
-  changePassword,
   getMe,
 };
