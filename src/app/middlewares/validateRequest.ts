@@ -26,8 +26,18 @@ const validateRequest =
     // Unknown fields have been stripped by the schema.
     const data = result.data as Record<string, unknown>;
     req.body = data.body ?? {};
-    req.query = data.query as typeof req.query;
-    req.params = data.params as typeof req.params;
+    Object.defineProperty(req, "query", {
+      value: data.query ?? {},
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
+    Object.defineProperty(req, "params", {
+      value: data.params ?? {},
+      writable: true,
+      configurable: true,
+      enumerable: true,
+    });
 
     next();
   };
