@@ -57,7 +57,7 @@ const createPost = async (userId: string, data: ICreatePostInput) => {
     },
     include: {
       author: {
-        select: { id: true, firstName: true, lastName: true, avatarUrl: true },
+        select: { id: true, firstName: true, lastName: true, email: true, avatarUrl: true },
       },
     },
   });
@@ -69,6 +69,7 @@ const createPost = async (userId: string, data: ICreatePostInput) => {
       id: post.author.id,
       firstName: post.author.firstName,
       lastName: post.author.lastName,
+      email: post.author.email,
       avatarUrl: post.author.avatarUrl,
     },
     text: post.text,

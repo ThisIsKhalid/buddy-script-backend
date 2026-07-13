@@ -3,10 +3,15 @@ import { Request, Response } from "express";
 import httpStatus from "http-status";
 import catchAsync from "../../../shared/catchAsync";
 import sendResponse from "../../../shared/sendResponse";
+import { getPublicImageUrl } from "../../../helpers/file_uploader/publicImageUrl";
 import { PostService } from "./post.service";
 
 const createPost = catchAsync(async (req: Request, res: Response) => {
-  const result = await PostService.createPost(req.user.id, req.body);
+  const imageUrl = req.file ? getPublicImageUrl(req.file.filename) : req.body.imageUrl;
+  const result = await PostService.createPost(req.user.id, {
+    ...req.body,
+    imageUrl,
+  });
   sendResponse(res, {
     success: true,
     statusCode: httpStatus.CREATED,

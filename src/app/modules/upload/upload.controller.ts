@@ -2,7 +2,7 @@ import { Request, Response } from "express";
 import catchAsync from "../../../shared/catchAsync";
 import sendResponse from "../../../shared/sendResponse";
 import httpStatus from "http-status";
-import config from "../../../config";
+import { getPublicImageUrl } from "../../../helpers/file_uploader/publicImageUrl";
 
 const uploadImage = catchAsync(async (req: Request, res: Response) => {
   if (!req.file) {
@@ -13,10 +13,7 @@ const uploadImage = catchAsync(async (req: Request, res: Response) => {
     });
   }
 
-  // Build the public URL for the uploaded file
-  const baseUrl = config.app.backendUrl || `http://localhost:${config.port}`;
-
-  const imageUrl = `${baseUrl}/uploads/images/${req.file.filename}`;
+  const imageUrl = getPublicImageUrl(req.file.filename);
 
   sendResponse(res, {
     success: true,

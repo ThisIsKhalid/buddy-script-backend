@@ -1,4 +1,5 @@
 import express from "express";
+import { imageUploader } from "../../../helpers/file_uploader/imageUploader";
 import auth from "../../middlewares/auth";
 import { RequestValidation } from "../../middlewares/validateRequest";
 import { PostController } from "./post.controller";
@@ -24,6 +25,7 @@ router.get(
 router.post(
   "/",
   auth(),
+  imageUploader.single("image"),
   RequestValidation.validateRequest(PostValidation.createPostZodSchema),
   PostController.createPost
 );

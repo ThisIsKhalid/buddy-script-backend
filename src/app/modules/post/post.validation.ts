@@ -34,7 +34,10 @@ const createPostZodSchema = z
       })
       .strict(),
   })
-  .refine((data) => data.body.text || data.body.imageUrl, {
+  .refine((data) => {
+    const text = data.body.text?.trim();
+    return text || data.body.imageUrl;
+  }, {
     message: "Post must have either text or an image",
     path: ["body"],
   });
